@@ -36,6 +36,19 @@ jobs:
           grep -q 'at %04X' src/spc700.c
           ! grep -q 'at %04lX' src/spc700.c
 
+      - name: Enable ARM assembly in jni/Android.mk
+        run: |
+          # Turn on the ARM code paths and the two asm modules (SPC700 and 65C816 CPU core).
+          sed -i \
+            -e 's/^ARM_ASM        := 0$/ARM_ASM        := 1\nASM_SPC700     := 1\nASM_CPU        := 1/' \
+            -e 's/^LOCAL_SRC_FILES := \$(SOURCES)$/LOCAL_SRC_FILES := $(SOURCES) $(SOURCES_ASM)/' \
+            jni/Android.mk
+          # Fail loudly if upstream changed the lines we patch.
+          grep -q '^ARM_ASM        := 1$' jni/Android.mk
+          grep -q '^ASM_SPC700     := 1$' jni/Android.mk
+          grep -q '^ASM_CPU        := 1$' jni/Android.mk
+          grep -q 'LOCAL_SRC_FILES := $(SOURCES) $(SOURCES_ASM)' jni/Android.mk
+
       - name: Build (ndk-build, per official jni/Android.mk)
         working-directory: jni
         env:
@@ -43,15 +56,20 @@ jobs:
         run: |
           # Xperia Play = Snapdragon S2 (Scorpion, Cortex-A8 class): ARMv7-A, VFPv3, NEON, softfp ABI.
           # LOCAL_ARM_MODE := arm already forces ARM (non-Thumb) code, so no -marm needed.
-          OPT_FLAGS="-O3 -ffast-math -fno-strict-aliasing -fomit-frame-pointer \
+          # Strict aliasing is left at the default (on), which matches upstream's ARM build path.
+          OPT_FLAGS="-O3 -ffast-math -fomit-frame-pointer \
             -fno-stack-protector -U_FORTIFY_SOURCE \
             -fno-unwind-tables -fno-asynchronous-unwind-tables \
             -fno-plt -fmerge-all-constants -fno-semantic-interposition \
             -mcpu=cortex-a8 -mtune=cortex-a8 -mfpu=neon -mfloat-abi=softfp \
             -funroll-loops -DNDEBUG -flto"
 
-          # r23c already passes --no-rosegment and -ffunction-sections/-fdata-sections.
-          LD_FLAGS="-Wl,--hash-style=both -Wl,-O2 -Wl,--gc-sections -flto -Wl,--icf=all"
+          # LTO codegen happens at link time, so the optimization level and CPU
+          # target must be passed to the linker too. r23c already adds
+          # --no-rosegment and -ffunction-sections/-fdata-sections.
+          LD_FLAGS="-Wl,--hash-style=both -Wl,-O2 -Wl,--gc-sections \
+            -O3 -mcpu=cortex-a8 -mfpu=neon -mfloat-abi=softfp \
+            -flto -Wl,--icf=all"
 
           "$NDK_HOME/ndk-build" -j"$(nproc)" \
             NDK_PROJECT_PATH=. \
@@ -68,7 +86,7 @@ jobs:
       - name: Rename and inspect output
         run: |
           mkdir -p dist
-          OUT=dist/snes9x2002_libretro_android_lto.so
+          OUT=dist/snes9x2002_libretro_android_lto_asm.so
           cp jni/libs/armeabi-v7a/libretro.so "$OUT"
           file "$OUT"
           ls -l "$OUT"
@@ -77,5 +95,5 @@ jobs:
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: snes9x2002_libretro_android-armeabi-v7a-lto
-          path: dist/snes9x2002_libretro_android_lto.so
+          name: snes9x2002_libretro_android-armeabi-v7a-lto-asm
+          path: dist/snes9x2002_libretro_android_lto_asm.so

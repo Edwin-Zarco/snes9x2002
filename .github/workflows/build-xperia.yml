@@ -36,19 +36,6 @@ jobs:
           grep -q 'at %04X' src/spc700.c
           ! grep -q 'at %04lX' src/spc700.c
 
-      - name: Enable ARM assembly in jni/Android.mk
-        run: |
-          # Turn on the ARM code paths and the two asm modules (SPC700 and 65C816 CPU core).
-          sed -i \
-            -e 's/^ARM_ASM        := 0$/ARM_ASM        := 1\nASM_SPC700     := 1\nASM_CPU        := 1/' \
-            -e 's/^LOCAL_SRC_FILES := \$(SOURCES)$/LOCAL_SRC_FILES := $(SOURCES) $(SOURCES_ASM)/' \
-            jni/Android.mk
-          # Fail loudly if upstream changed the lines we patch.
-          grep -q '^ARM_ASM        := 1$' jni/Android.mk
-          grep -q '^ASM_SPC700     := 1$' jni/Android.mk
-          grep -q '^ASM_CPU        := 1$' jni/Android.mk
-          grep -q 'LOCAL_SRC_FILES := $(SOURCES) $(SOURCES_ASM)' jni/Android.mk
-
       - name: Build (ndk-build, per official jni/Android.mk)
         working-directory: jni
         env:
@@ -56,7 +43,7 @@ jobs:
         run: |
           # Xperia Play = Snapdragon S2 (Scorpion, Cortex-A8 class): ARMv7-A, VFPv3, NEON, softfp ABI.
           # LOCAL_ARM_MODE := arm already forces ARM (non-Thumb) code, so no -marm needed.
-          # Strict aliasing is left at the default (on), which matches upstream's ARM build path.
+          # Strict aliasing is left at the default (on). ARM assembly is disabled (ARM_ASM stays 0).
           OPT_FLAGS="-O3 -ffast-math -fomit-frame-pointer \
             -fno-stack-protector -U_FORTIFY_SOURCE \
             -fno-unwind-tables -fno-asynchronous-unwind-tables \

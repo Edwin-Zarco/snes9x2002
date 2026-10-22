@@ -25,16 +25,33 @@ jobs:
           add-to-path: false
           link-to-sdk: false
 
+      - name: Apply source fixes
+        run: |
+          # sa1.c: range check was always false (&& instead of ||)
+          sed -i 's/(address < 0x2300) && (address > 0x230d)/(address < 0x2300) || (address > 0x230d)/' src/sa1.c
+          grep -q '(address < 0x2300) || (address > 0x230d)' src/sa1.c
+
+          # spc700.c: %lX used with an int argument
+          sed -i 's/at %04lX/at %04X/' src/spc700.c
+          grep -q 'at %04X' src/spc700.c
+          ! grep -q 'at %04lX' src/spc700.c
+
       - name: Build (ndk-build, per official jni/Android.mk)
         working-directory: jni
         env:
           NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
         run: |
-          # Xperia Play = Snapdragon S2 (Scorpion, Cortex-A8 class): ARMv7-A, VFPv3, NEON, softfp ABI
-          OPT_FLAGS="-O3 -ffast-math -fomit-frame-pointer -fno-stack-protector \
+          # Xperia Play = Snapdragon S2 (Scorpion, Cortex-A8 class): ARMv7-A, VFPv3, NEON, softfp ABI.
+          # LOCAL_ARM_MODE := arm already forces ARM (non-Thumb) code, so no -marm needed.
+          OPT_FLAGS="-O3 -ffast-math -fno-strict-aliasing -fomit-frame-pointer \
+            -fno-stack-protector -U_FORTIFY_SOURCE \
+            -fno-unwind-tables -fno-asynchronous-unwind-tables \
             -fno-plt -fmerge-all-constants -fno-semantic-interposition \
-            -marm -mcpu=cortex-a8 -mtune=cortex-a8 -mfpu=neon -mfloat-abi=softfp \
-            -funroll-loops -ftree-vectorize -DNDEBUG -fno-strict-aliasing"
+            -mcpu=cortex-a8 -mtune=cortex-a8 -mfpu=neon -mfloat-abi=softfp \
+            -funroll-loops -DNDEBUG -flto"
+
+          # r23c already passes --no-rosegment and -ffunction-sections/-fdata-sections.
+          LD_FLAGS="-Wl,--hash-style=both -Wl,-O2 -Wl,--gc-sections -flto -Wl,--icf=all"
 
           "$NDK_HOME/ndk-build" -j"$(nproc)" \
             NDK_PROJECT_PATH=. \
@@ -45,18 +62,20 @@ jobs:
             APP_STL=none \
             APP_OPTIM=release \
             APP_CFLAGS="$OPT_FLAGS" \
-            APP_LDFLAGS="-Wl,--hash-style=both -Wl,-O2 -Wl,--gc-sections -Wl,--no-rosegment" \
+            APP_LDFLAGS="$LD_FLAGS" \
             V=1
 
-      - name: Rename and strip output
+      - name: Rename and inspect output
         run: |
           mkdir -p dist
-          cp jni/libs/armeabi-v7a/libretro.so dist/snes9x2002_libretro_android.so
-          file dist/snes9x2002_libretro_android.so
-          "${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -A dist/snes9x2002_libretro_android.so | head -20
+          OUT=dist/snes9x2002_libretro_android_lto.so
+          cp jni/libs/armeabi-v7a/libretro.so "$OUT"
+          file "$OUT"
+          ls -l "$OUT"
+          "${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -A "$OUT" | head -20
 
       - name: Upload artifact
         uses: actions/upload-artifact@v7
         with:
-          name: snes9x2002_libretro_android-armeabi-v7a
-          path: dist/snes9x2002_libretro_android.so
+          name: snes9x2002_libretro_android-armeabi-v7a-lto
+          path: dist/snes9x2002_libretro_android_lto.so

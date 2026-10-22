@@ -1,0 +1,62 @@
+name: Build snes9x2002 (Android armeabi-v7a, Xperia Play)
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+env:
+  NDK_VERSION: r23c
+  # NDK r23c's minimum API is 16 (Android 4.1). API 15 (4.0.4) needs NDK r17 or older.
+  ANDROID_API: 16
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+
+      - name: Set up NDK r23c
+        id: ndk
+        uses: nttld/setup-ndk@v1
+        with:
+          ndk-version: r23c
+          add-to-path: false
+          link-to-sdk: false
+
+      - name: Build (ndk-build, per official jni/Android.mk)
+        working-directory: jni
+        env:
+          NDK_HOME: ${{ steps.ndk.outputs.ndk-path }}
+        run: |
+          # Xperia Play = Snapdragon S2 (Scorpion, Cortex-A8 class): ARMv7-A, VFPv3, NEON, softfp ABI
+          OPT_FLAGS="-O3 -ffast-math -fomit-frame-pointer -fno-stack-protector \
+            -fno-plt -fmerge-all-constants -fno-semantic-interposition \
+            -marm -mcpu=cortex-a8 -mtune=cortex-a8 -mfpu=neon -mfloat-abi=softfp \
+            -funroll-loops -ftree-vectorize -DNDEBUG -fno-strict-aliasing"
+
+          "$NDK_HOME/ndk-build" -j"$(nproc)" \
+            NDK_PROJECT_PATH=. \
+            APP_BUILD_SCRIPT=./Android.mk \
+            NDK_APPLICATION_MK=./Application.mk \
+            APP_ABI=armeabi-v7a \
+            APP_PLATFORM=android-${ANDROID_API} \
+            APP_STL=none \
+            APP_OPTIM=release \
+            APP_CFLAGS="$OPT_FLAGS" \
+            APP_LDFLAGS="-Wl,--hash-style=both -Wl,-O2 -Wl,--gc-sections -Wl,--no-rosegment" \
+            V=1
+
+      - name: Rename and strip output
+        run: |
+          mkdir -p dist
+          cp jni/libs/armeabi-v7a/libretro.so dist/snes9x2002_libretro_android.so
+          file dist/snes9x2002_libretro_android.so
+          "${{ steps.ndk.outputs.ndk-path }}/toolchains/llvm/prebuilt/linux-x86_64/bin/llvm-readelf" -A dist/snes9x2002_libretro_android.so | head -20
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v7
+        with:
+          name: snes9x2002_libretro_android-armeabi-v7a
+          path: dist/snes9x2002_libretro_android.so
